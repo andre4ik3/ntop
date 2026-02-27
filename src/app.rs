@@ -1,20 +1,22 @@
 use crate::ps;
 use anyhow::Context;
+use chrono::TimeDelta;
 use crossterm::event::{Event as TerminalEvent, KeyCode, KeyEvent, KeyModifiers};
 use futures::{FutureExt, StreamExt};
+use std::fmt::format;
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
 
-use ratatui::text::Line;
-use ratatui::widgets::{List, ListItem, ListState};
-use ratatui::{
-    layout::Alignment, style::{Style, Stylize}
-    ,
-    widgets::{Block, BorderType, StatefulWidget, Widget},
-    DefaultTerminal,
-    Frame,
-};
+use ratatui::layout::Constraint;
 use ratatui::prelude::Color;
+use ratatui::text::Line;
+use ratatui::widgets::{Cell, Row, Table, TableState};
+use ratatui::{
+    DefaultTerminal, Frame,
+    layout::Alignment,
+    style::{Style, Stylize},
+    widgets::{Block, BorderType, StatefulWidget, Widget},
+};
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -41,7 +43,7 @@ pub struct App {
     pub active_builds: Vec<ps::Build>,
 
     // stuff
-    pub list_state: ListState,
+    pub table_state: TableState,
 }
 
 impl App {
@@ -53,7 +55,7 @@ impl App {
             receiver,
             refresh_interval: Duration::from_secs(5),
             active_builds: Vec::new(),
-            list_state: ListState::default(),
+            table_state: TableState::default(),
         }
     }
 
@@ -123,9 +125,9 @@ impl App {
             }
 
             // active builds table
-            KeyCode::Up => self.list_state.select_previous(),
-            KeyCode::Down => self.list_state.select_next(),
-            KeyCode::Esc => self.list_state.select(None),
+            KeyCode::Up => self.table_state.select_previous(),
+            KeyCode::Down => self.table_state.select_next(),
+            KeyCode::Esc => self.table_state.select(None),
 
             // quitting
             KeyCode::Char('q') => _ = self.sender.send(Event::App(AppEvent::Quit)),
@@ -171,33 +173,78 @@ impl App {
                     format!(" {}ms ", self.refresh_interval.as_millis()).white(),
                     "+".red(),
                 ])
-                .alignment(Alignment::Right)
+                .alignment(Alignment::Right),
             )
-            .title_bottom(Line::from(vec![
-                "↑".red(),
-                " select ".white(),
-                "↓".red(),
-            ]))
+            .title_bottom(Line::from(vec!["↑".red(), " select ".white(), "↓".red()]))
             .border_type(BorderType::Rounded)
             .border_style(Style::new().black());
 
-        let list = List::new(&self.active_builds)
-            .block(block)
-            .highlight_style(Style::new().bg(Color::Rgb(19, 57, 117)))
-            .repeat_highlight_symbol(true);
+        let widths = [
+            Constraint::Length(10),     // PID
+            Constraint::Percentage(70), // pname
+            Constraint::Percentage(30), // version
+            Constraint::Length(10),     // time?
+        ];
 
-        frame.render_stateful_widget(list, frame.area(), &mut self.list_state);
+        let header = Row::new(vec![
+            Cell::from("PID"),
+            Cell::from("Package"),
+            Cell::from("Version"),
+            Cell::from("Time"),
+        ])
+        .dim()
+        .underlined();
+
+        let table = Table::new(&self.active_builds, widths)
+            .block(block)
+            .header(header)
+            .row_highlight_style(Style::new().bg(Color::Rgb(19, 57, 117)));
+
+        frame.render_stateful_widget(table, frame.area(), &mut self.table_state);
     }
 }
 
-impl<'a> Into<ListItem<'a>> for &ps::Build {
-    fn into(self) -> ListItem<'a> {
+impl<'a> Into<Row<'a>> for &ps::Build {
+    fn into(self) -> Row<'a> {
         // drop hash prefix and .drv suffix
         let name = &self.derivation[33..self.derivation.len() - 4];
+        let mut cells = vec![];
+        cells.push(Cell::from(format!("{}", self.nix_pid)));
+
         if let Some((pname, version)) = name.rsplit_once('-') {
-            ListItem::new(format!("{} ({})", pname, version))
+            cells.push(Cell::from(pname.to_string()).light_green());
+            cells.push(Cell::from(version.to_string()).cyan());
         } else {
-            ListItem::new(format!("{}", name))
+            cells.push(Cell::from(name.to_string()).light_green());
+            cells.push(Cell::from(""));
         }
+        cells.push(Cell::from(show_duration(self.elapsed())));
+        Row::new(cells)
     }
+}
+
+fn show_duration(duration: TimeDelta) -> String {
+    let mut duration = duration;
+    let mut components = vec![];
+
+    if duration.num_days() > 0 {
+        components.push(format!("{}d", duration.num_days()));
+        duration = duration - TimeDelta::days(duration.num_days());
+    }
+
+    if duration.num_hours() > 0 {
+        components.push(format!("{}h", duration.num_hours()));
+        duration = duration - TimeDelta::hours(duration.num_hours());
+    }
+
+    if duration.num_minutes() > 0 && components.len() < 2 {
+        components.push(format!("{}m", duration.num_minutes()));
+        duration = duration - TimeDelta::minutes(duration.num_minutes());
+    }
+
+    if duration.num_seconds() > 0 && components.len() < 2 {
+        components.push(format!("{}s", duration.num_seconds()));
+    }
+
+    components.join(" ")
 }
