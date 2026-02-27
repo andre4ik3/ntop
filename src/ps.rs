@@ -1,4 +1,4 @@
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tokio::process::Command;
 
@@ -28,11 +28,9 @@ pub struct Build {
 }
 
 impl Build {
-    pub fn elapsed(&self) -> TimeDelta {
-        let start_time = DateTime::from_timestamp_secs(self.start_time as i64)
-            .expect("failed to convert millis to datetime??");
-        let now = Utc::now();
-        now - start_time
+    pub fn started(&self) -> DateTime<Utc> {
+        DateTime::from_timestamp_secs(self.start_time as i64)
+            .expect("failed to convert millis to datetime??")
     }
 }
 

@@ -1,21 +1,19 @@
 use crate::ps;
 use anyhow::Context;
-use chrono::TimeDelta;
+use chrono::{TimeDelta, Utc};
 use crossterm::event::{Event as TerminalEvent, KeyCode, KeyEvent, KeyModifiers};
 use futures::{FutureExt, StreamExt};
-use std::fmt::format;
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
 
-use ratatui::layout::Constraint;
-use ratatui::prelude::Color;
-use ratatui::text::Line;
-use ratatui::widgets::{Cell, Row, Table, TableState};
+use ratatui::text::Text;
+use ratatui::widgets::Padding;
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::Alignment,
-    style::{Style, Stylize},
-    widgets::{Block, BorderType, StatefulWidget, Widget},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Style, Stylize},
+    text::Line,
+    widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState},
 };
 
 #[derive(Debug)]
@@ -53,7 +51,7 @@ impl App {
             running: true,
             sender,
             receiver,
-            refresh_interval: Duration::from_secs(5),
+            refresh_interval: Duration::from_secs(2),
             active_builds: Vec::new(),
             table_state: TableState::default(),
         }
@@ -143,11 +141,21 @@ impl App {
     fn refresh(&mut self, output: anyhow::Result<ps::Output>) {
         if let Ok(builds) = output {
             // TODO: handle errors
+            let previous_selection = self
+                .table_state
+                .selected()
+                .and_then(|i| self.active_builds.get(i))
+                .map(|b| b.nix_pid);
+
             self.active_builds = builds;
+            let new_selection = previous_selection
+                .and_then(|pid| self.active_builds.iter().position(|b| b.nix_pid == pid));
+
+            self.table_state.select(new_selection);
         }
 
         // schedule next refresh
-        let duration = self.refresh_interval.clone();
+        let duration = self.refresh_interval;
         let sender = self.sender.clone();
         tokio::spawn(async move {
             tokio::select! {
@@ -165,8 +173,9 @@ impl App {
         });
     }
 
-    fn render(&mut self, frame: &mut Frame) {
+    fn render_builds(&mut self, frame: &mut Frame, rect: Rect) {
         let block = Block::bordered()
+            .title_top(Line::from("Active builds").cyan())
             .title_top(
                 Line::from(vec![
                     "-".red(),
@@ -177,17 +186,18 @@ impl App {
             )
             .title_bottom(Line::from(vec!["↑".red(), " select ".white(), "↓".red()]))
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().black());
+            .border_style(Style::new().black())
+            .padding(Padding::horizontal(1));
 
         let widths = [
-            Constraint::Length(10),     // PID
-            Constraint::Percentage(70), // pname
-            Constraint::Percentage(30), // version
-            Constraint::Length(10),     // time?
+            Constraint::Length(7),      // PID
+            Constraint::Percentage(80), // pname
+            Constraint::Percentage(20), // version
+            Constraint::Length(10),     // time
         ];
 
         let header = Row::new(vec![
-            Cell::from("PID"),
+            Cell::from(Text::raw("PID").alignment(Alignment::Right)),
             Cell::from("Package"),
             Cell::from("Version"),
             Cell::from("Time"),
@@ -200,16 +210,88 @@ impl App {
             .header(header)
             .row_highlight_style(Style::new().bg(Color::Rgb(19, 57, 117)));
 
-        frame.render_stateful_widget(table, frame.area(), &mut self.table_state);
+        frame.render_stateful_widget(table, rect, &mut self.table_state);
+    }
+
+    fn render_build_details(&self, frame: &mut Frame, rect: Rect, build: &ps::Build) {
+        let block = Block::bordered()
+            .title_top(Line::from("Build").cyan())
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().black())
+            .padding(Padding::uniform(1));
+
+        let layout = Layout::new(
+            Direction::Vertical,
+            vec![Constraint::Length(5), Constraint::Percentage(100)],
+        )
+        .split(block.inner(rect));
+
+        let rows = vec![
+            Row::new(vec![
+                Cell::new(Text::raw("Derivation").alignment(Alignment::Right).dim()),
+                Cell::new(format!("/nix/store/{}", build.derivation)).magenta(),
+            ]),
+            Row::new(vec![
+                Cell::new(Text::raw("Started at").alignment(Alignment::Right).dim()),
+                Cell::new(format!("{}", build.started())).yellow(),
+            ]),
+            Row::new(vec![
+                Cell::new(Text::raw("Main PID").alignment(Alignment::Right).dim()),
+                Cell::new(format!("{}", build.main_pid)).white(),
+            ]),
+            Row::new(vec![
+                Cell::new(Text::raw("Nix PID").alignment(Alignment::Right).dim()),
+                Cell::new(format!("{}", build.nix_pid)).white(),
+            ]),
+        ];
+
+        let widths = [Constraint::Length(10), Constraint::Percentage(100)];
+
+        let properties = Table::new(rows, widths);
+        let p = Paragraph::new(format!("{} processes", build.processes.len()));
+
+        frame.render_widget(block, rect);
+        frame.render_widget(properties, layout[0]);
+        frame.render_widget(p, layout[1]);
+    }
+
+    fn render_details(&self, frame: &mut Frame, rect: Rect) {
+        if let Some(selected) = self
+            .table_state
+            .selected()
+            .and_then(|i| self.active_builds.get(i))
+        {
+            self.render_build_details(frame, rect, selected);
+        } else {
+            let text = Text::raw("Select a build to show its details").dim();
+            let area = rect.centered(
+                Constraint::Length(text.width() as u16),
+                Constraint::Length(1),
+            );
+            frame.render_widget(text, area);
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame) {
+        let layout = Layout::new(
+            Direction::Horizontal,
+            vec![Constraint::Percentage(40), Constraint::Percentage(70)],
+        )
+        .split(frame.area());
+
+        self.render_builds(frame, layout[0]);
+        self.render_details(frame, layout[1]);
     }
 }
 
-impl<'a> Into<Row<'a>> for &ps::Build {
-    fn into(self) -> Row<'a> {
+impl<'a> From<&ps::Build> for Row<'a> {
+    fn from(value: &ps::Build) -> Row<'a> {
         // drop hash prefix and .drv suffix
-        let name = &self.derivation[33..self.derivation.len() - 4];
+        let name = &value.derivation[33..value.derivation.len() - 4];
         let mut cells = vec![];
-        cells.push(Cell::from(format!("{}", self.nix_pid)));
+        cells.push(Cell::from(
+            Text::raw(format!("{}", value.nix_pid)).alignment(Alignment::Right),
+        ));
 
         if let Some((pname, version)) = name.rsplit_once('-') {
             cells.push(Cell::from(pname.to_string()).light_green());
@@ -218,7 +300,7 @@ impl<'a> Into<Row<'a>> for &ps::Build {
             cells.push(Cell::from(name.to_string()).light_green());
             cells.push(Cell::from(""));
         }
-        cells.push(Cell::from(show_duration(self.elapsed())));
+        cells.push(Cell::from(show_duration(Utc::now() - value.started())));
         Row::new(cells)
     }
 }
