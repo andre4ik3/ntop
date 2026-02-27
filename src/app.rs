@@ -228,27 +228,27 @@ impl App {
 
         let rows = vec![
             Row::new(vec![
-                Cell::new(Text::raw("Derivation").alignment(Alignment::Right).dim()),
+                Cell::new(Text::raw("Derivation").alignment(Alignment::Right)).dim(),
                 Cell::new(format!("/nix/store/{}", build.derivation)).magenta(),
             ]),
             Row::new(vec![
-                Cell::new(Text::raw("Started at").alignment(Alignment::Right).dim()),
+                Cell::new(Text::raw("Started at").alignment(Alignment::Right)).dim(),
                 Cell::new(format!("{}", build.started())).yellow(),
             ]),
             Row::new(vec![
-                Cell::new(Text::raw("Main PID").alignment(Alignment::Right).dim()),
-                Cell::new(format!("{}", build.main_pid)).white(),
+                Cell::new(Text::raw("Main PID").alignment(Alignment::Right)).dim(),
+                Cell::new(format!("{}", build.main_pid)),
             ]),
             Row::new(vec![
-                Cell::new(Text::raw("Nix PID").alignment(Alignment::Right).dim()),
-                Cell::new(format!("{}", build.nix_pid)).white(),
+                Cell::new(Text::raw("Nix PID").alignment(Alignment::Right)).dim(),
+                Cell::new(format!("{}", build.nix_pid)),
             ]),
         ];
 
         let widths = [Constraint::Length(10), Constraint::Percentage(100)];
 
         let properties = Table::new(rows, widths);
-        let p = Paragraph::new(format!("{} processes", build.processes.len()));
+        let p = Paragraph::new(render_tree(build, build.main_pid));
 
         frame.render_widget(block, rect);
         frame.render_widget(properties, layout[0]);
@@ -329,4 +329,41 @@ fn show_duration(duration: TimeDelta) -> String {
     }
 
     components.join(" ")
+}
+
+fn render_tree(build: &ps::Build, pid: usize) -> String {
+    let mut components = vec![];
+
+    let Some(top) = build.processes.iter().find(|p| p.pid == pid) else {
+        return "".to_string();
+    };
+
+    components.push(top.argv.join(" "));
+
+    let children: Vec<&ps::BuildProcess> = build
+        .processes
+        .iter()
+        .filter(|p| p.parent_pid == pid)
+        .collect();
+    for (i, child) in children.iter().enumerate() {
+        let last = i == children.len() - 1;
+        let subtree = render_tree(build, child.pid);
+        let mut lines = subtree.lines();
+        if let Some(line) = lines.next() {
+            if last {
+                components.push(format!("└─── {line}"));
+            } else {
+                components.push(format!("├─── {line}"));
+            }
+        }
+        for line in lines {
+            if last {
+                components.push(format!("     {line}"));
+            } else {
+                components.push(format!("│    {line}"));
+            }
+        }
+    }
+
+    components.join("\n")
 }
