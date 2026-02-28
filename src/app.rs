@@ -124,8 +124,8 @@ impl App {
             }
 
             // active builds table
-            KeyCode::Up => self.table_state.select_previous(),
-            KeyCode::Down => self.table_state.select_next(),
+            KeyCode::Up | KeyCode::Char('k') => self.table_state.select_previous(),
+            KeyCode::Down | KeyCode::Char('j') => self.table_state.select_next(),
             KeyCode::Esc => self.table_state.select(None),
 
             // flip direction
