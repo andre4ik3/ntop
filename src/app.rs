@@ -153,11 +153,11 @@ impl App {
                 .table_state
                 .selected()
                 .and_then(|i| self.active_builds.get(i))
-                .map(|b| b.nix_pid);
+                .map(|b| b.main_pid);
 
             self.active_builds = builds;
             let new_selection = previous_selection
-                .and_then(|pid| self.active_builds.iter().position(|b| b.nix_pid == pid));
+                .and_then(|pid| self.active_builds.iter().position(|b| b.main_pid == pid));
 
             self.table_state.select(new_selection);
         }
@@ -292,7 +292,7 @@ impl<'a> From<&'a ps::Build> for Row<'a> {
         };
 
         row![
-            text!(format!("{}", value.nix_pid)).alignment(Alignment::Right),
+            text!(format!("{}", value.main_pid)).alignment(Alignment::Right),
             pname.light_green(),
             version.light_cyan(),
             show_duration(Utc::now() - value.started()),
