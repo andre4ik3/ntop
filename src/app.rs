@@ -8,8 +8,8 @@ use tokio::{sync::mpsc, time};
 
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Alignment, Rect},
-    macros::{constraint, constraints, horizontal, row, text, vertical},
+    layout::{Alignment, Direction, Layout, Rect},
+    macros::{constraint, constraints, line, row, text, vertical},
     style::{Color, Style, Stylize},
     text::{Line, Text},
     widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState},
@@ -40,6 +40,7 @@ pub struct App {
     pub active_builds: Vec<ps::Build>,
 
     // stuff
+    pub direction: Direction,
     pub table_state: TableState,
 }
 
@@ -52,6 +53,7 @@ impl App {
             receiver,
             refresh_interval: Duration::from_secs(2),
             active_builds: Vec::new(),
+            direction: Direction::Vertical,
             table_state: TableState::default(),
         }
     }
@@ -126,6 +128,14 @@ impl App {
             KeyCode::Down => self.table_state.select_next(),
             KeyCode::Esc => self.table_state.select(None),
 
+            // flip direction
+            KeyCode::Char('/') => {
+                self.direction = match self.direction {
+                    Direction::Horizontal => Direction::Vertical,
+                    Direction::Vertical => Direction::Horizontal,
+                };
+            }
+
             // quitting
             KeyCode::Char('q') => _ = self.sender.send(Event::App(AppEvent::Quit)),
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
@@ -183,7 +193,8 @@ impl App {
                 ])
                 .alignment(Alignment::Right),
             )
-            .title_bottom(Line::from(vec!["↑".red(), " select ".white(), "↓".red()]))
+            .title_bottom(line!["↑".red(), " select ".white(), "↓".red()])
+            .title_bottom(line!["/".red(), " change layout".white()].alignment(Alignment::Right))
             .border_type(BorderType::Rounded)
             .border_style(Style::new().black())
             .padding(Padding::horizontal(1));
@@ -264,7 +275,7 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let layout = horizontal![==40%, ==60%].split(frame.area());
+        let layout = Layout::new(self.direction, constraints![==40%, ==60%]).split(frame.area());
         self.render_builds(frame, layout[0]);
         self.render_details(frame, layout[1]);
     }
