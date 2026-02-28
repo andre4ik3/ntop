@@ -6,14 +6,13 @@ use futures::{FutureExt, StreamExt};
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
 
-use ratatui::text::Text;
-use ratatui::widgets::Padding;
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
+    macros::{constraint, constraints, horizontal, row, text, vertical},
     style::{Color, Style, Stylize},
-    text::Line,
-    widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState},
+    text::{Line, Text},
+    widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState},
 };
 
 #[derive(Debug)]
@@ -189,13 +188,6 @@ impl App {
             .border_style(Style::new().black())
             .padding(Padding::horizontal(1));
 
-        let widths = [
-            Constraint::Length(7),      // PID
-            Constraint::Percentage(80), // pname
-            Constraint::Percentage(20), // version
-            Constraint::Length(10),     // time
-        ];
-
         let header = Row::new(vec![
             Cell::from(Text::raw("PID").alignment(Alignment::Right)),
             Cell::from("Package"),
@@ -205,10 +197,18 @@ impl App {
         .dim()
         .underlined();
 
-        let table = Table::new(&self.active_builds, widths)
-            .block(block)
-            .header(header)
-            .row_highlight_style(Style::new().bg(Color::Rgb(19, 57, 117)));
+        let table = Table::new(
+            &self.active_builds,
+            constraints![
+                ==7,
+                ==80%,
+                ==20%,
+                ==10
+            ],
+        )
+        .block(block)
+        .header(header)
+        .row_highlight_style(Style::new().bg(Color::Rgb(19, 57, 117)));
 
         frame.render_stateful_widget(table, rect, &mut self.table_state);
     }
@@ -220,34 +220,28 @@ impl App {
             .border_style(Style::new().black())
             .padding(Padding::uniform(1));
 
-        let layout = Layout::new(
-            Direction::Vertical,
-            vec![Constraint::Length(5), Constraint::Percentage(100)],
-        )
-        .split(block.inner(rect));
+        let layout = vertical![==5, ==100%].split(block.inner(rect));
 
         let rows = vec![
-            Row::new(vec![
-                Cell::new(Text::raw("Derivation").alignment(Alignment::Right)).dim(),
-                Cell::new(format!("/nix/store/{}", build.derivation)).magenta(),
-            ]),
-            Row::new(vec![
-                Cell::new(Text::raw("Started at").alignment(Alignment::Right)).dim(),
-                Cell::new(format!("{}", build.started())).yellow(),
-            ]),
-            Row::new(vec![
-                Cell::new(Text::raw("Main PID").alignment(Alignment::Right)).dim(),
-                Cell::new(format!("{}", build.main_pid)),
-            ]),
-            Row::new(vec![
-                Cell::new(Text::raw("Nix PID").alignment(Alignment::Right)).dim(),
-                Cell::new(format!("{}", build.nix_pid)),
-            ]),
+            row![
+                text!("Derivation").alignment(Alignment::Right).dim(),
+                format!("/nix/store/{}", build.derivation).magenta(),
+            ],
+            row![
+                text!("Started at").alignment(Alignment::Right).dim(),
+                format!("{}", build.started()).yellow(),
+            ],
+            row![
+                text!("Main PID").alignment(Alignment::Right).dim(),
+                format!("{}", build.main_pid),
+            ],
+            row![
+                text!("Nix PID").alignment(Alignment::Right).dim(),
+                format!("{}", build.nix_pid),
+            ],
         ];
 
-        let widths = [Constraint::Length(10), Constraint::Percentage(100)];
-
-        let properties = Table::new(rows, widths);
+        let properties = Table::new(rows, constraints![==10, ==100%]);
         let p = Paragraph::new(render_tree(build, build.main_pid));
 
         frame.render_widget(block, rect);
@@ -264,44 +258,35 @@ impl App {
             self.render_build_details(frame, rect, selected);
         } else {
             let text = Text::raw("Select a build to show its details").dim();
-            let area = rect.centered(
-                Constraint::Length(text.width() as u16),
-                Constraint::Length(1),
-            );
+            let area = rect.centered(constraint!(==text.width() as u16), constraint!(==1));
             frame.render_widget(text, area);
         }
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let layout = Layout::new(
-            Direction::Horizontal,
-            vec![Constraint::Percentage(40), Constraint::Percentage(70)],
-        )
-        .split(frame.area());
-
+        let layout = horizontal![==40%, ==60%].split(frame.area());
         self.render_builds(frame, layout[0]);
         self.render_details(frame, layout[1]);
     }
 }
 
-impl<'a> From<&ps::Build> for Row<'a> {
-    fn from(value: &ps::Build) -> Row<'a> {
+impl<'a> From<&'a ps::Build> for Row<'a> {
+    fn from(value: &'a ps::Build) -> Row<'a> {
         // drop hash prefix and .drv suffix
         let name = &value.derivation[33..value.derivation.len() - 4];
-        let mut cells = vec![];
-        cells.push(Cell::from(
-            Text::raw(format!("{}", value.nix_pid)).alignment(Alignment::Right),
-        ));
 
-        if let Some((pname, version)) = name.rsplit_once('-') {
-            cells.push(Cell::from(pname.to_string()).light_green());
-            cells.push(Cell::from(version.to_string()).cyan());
+        let (pname, version) = if let Some((pname, version)) = name.rsplit_once('-') {
+            (pname, version)
         } else {
-            cells.push(Cell::from(name.to_string()).light_green());
-            cells.push(Cell::from(""));
-        }
-        cells.push(Cell::from(show_duration(Utc::now() - value.started())));
-        Row::new(cells)
+            (name, "")
+        };
+
+        row![
+            text!(format!("{}", value.nix_pid)).alignment(Alignment::Right),
+            pname.light_green(),
+            version.light_cyan(),
+            show_duration(Utc::now() - value.started()),
+        ]
     }
 }
 
