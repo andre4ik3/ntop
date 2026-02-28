@@ -11,7 +11,6 @@ use ratatui::{
     layout::{Alignment, Direction, Layout, Rect},
     macros::{constraint, constraints, line, row, text, vertical},
     style::{Color, Style, Stylize},
-    text::{Line, Text},
     widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState},
 };
 
@@ -184,13 +183,13 @@ impl App {
 
     fn render_builds(&mut self, frame: &mut Frame, rect: Rect) {
         let block = Block::bordered()
-            .title_top(Line::from("Active builds").cyan())
+            .title_top(line!["Active builds".cyan()])
             .title_top(
-                Line::from(vec![
+                line![
                     "-".red(),
                     format!(" {}ms ", self.refresh_interval.as_millis()).white(),
                     "+".red(),
-                ])
+                ]
                 .alignment(Alignment::Right),
             )
             .title_bottom(line!["↑".red(), " select ".white(), "↓".red()])
@@ -200,7 +199,7 @@ impl App {
             .padding(Padding::horizontal(1));
 
         let header = Row::new(vec![
-            Cell::from(Text::raw("PID").alignment(Alignment::Right)),
+            Cell::from(text!("PID").alignment(Alignment::Right)),
             Cell::from("Package"),
             Cell::from("Version"),
             Cell::from("Time"),
@@ -226,7 +225,7 @@ impl App {
 
     fn render_build_details(&self, frame: &mut Frame, rect: Rect, build: &ps::Build) {
         let block = Block::bordered()
-            .title_top(Line::from("Build").cyan())
+            .title_top(line!["Build".cyan()])
             .border_type(BorderType::Rounded)
             .border_style(Style::new().black())
             .padding(Padding::uniform(1));
@@ -268,7 +267,7 @@ impl App {
         {
             self.render_build_details(frame, rect, selected);
         } else {
-            let text = Text::raw("Select a build to show its details").dim();
+            let text = text!("Select a build to show its details").dim();
             let area = rect.centered(constraint!(==text.width() as u16), constraint!(==1));
             frame.render_widget(text, area);
         }
